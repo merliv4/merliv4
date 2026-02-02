@@ -1,6 +1,25 @@
-import requests, random, time, os
+import requests, random, time, os, string
+from flask import Flask
+from threading import Thread
 
-# --- AYARLAR ---
+# --- RENDER 7/24 UYANIK TUTMA MOTORU ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🔱 MerliV4 Aktif!"
+
+def run():
+    # Render'ın portunu dinamik olarak yakalar
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.daemon = True
+    t.start()
+
+# --- SENİN ORİJİNAL AYARLARIN ---
 TOKEN = "8250377483:AAEn4fn1mbPE7Y8KMXP-1iGH1Tpy17bxbS4"
 ADMIN_ID = "7636413914"
 URL = f"https://api.telegram.org/bot{TOKEN}/"
@@ -15,9 +34,7 @@ def luhn(n):
     return (sum(r[-1::-2] + [sum(divmod(d * 2, 10)) for d in r[-2::-2]]) % 10 == 0)
 
 def get_bin_info(bin_no):
-    """Geliştirilmiş BIN Sorgu (Deep Scan)"""
     try:
-        # Daha geniş kapsamlı bir API denemesi
         res = requests.get(f"https://data.handyapi.com/bin/{bin_no}", timeout=7).json()
         if res.get("Status") == "SUCCESS":
             return {
@@ -28,8 +45,6 @@ def get_bin_info(bin_no):
                 "status": "🟢 LİVE"
             }
     except: pass
-    
-    # Yedek API
     try:
         res = requests.get(f"https://lookup.binlist.net/{bin_no}", timeout=5).json()
         return {
@@ -67,7 +82,6 @@ def main():
                 if not txt.startswith("/"):
                     log_at(f"💬 **Mesaj:** @{u_name}\n📝: {txt}")
 
-                # --- START & HELP (MerliV4 Arayüzü) ---
                 if txt in ["/start", "/help"]:
                     kb = {"inline_keyboard": [[{"text":"🔥 ÜRETİM (GEN)","callback_data":"b_gen"},{"text":"🔍 ANALİZ (BIN)","callback_data":"b_bin"}]]}
                     msg = (
@@ -81,11 +95,9 @@ def main():
                     )
                     requests.post(URL + "sendMessage", json={"chat_id": cid, "text": msg, "reply_markup": kb, "parse_mode": "Markdown"})
 
-                # --- BIN ANALİZ ---
                 elif txt.startswith("/bin"):
                     bin_no = "".join(filter(str.isdigit, txt))[:6]
                     if len(bin_no) < 6: continue
-                    
                     data = get_bin_info(bin_no)
                     if data:
                         info = (f"🛡 **MerliV4 BİN RAPORU**\n"
@@ -96,17 +108,13 @@ def main():
                                 f"🌍 **ÜLKE:** `{data['country']}`\n"
                                 f"📡 **DURUM:** `{data['status']}`")
                         requests.post(URL + "sendMessage", json={"chat_id": cid, "text": info, "parse_mode": "Markdown"})
-                        log_at(f"🔍 **BIN:** `{bin_no}` | @{u_name}")
                     else:
                         requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "🔴 **Hata:** BIN bilgisi bulunamadı."})
 
-                # --- GEN SİSTEMİ (150 LİMİTİ) ---
                 elif txt.startswith("/gen"):
                     try:
                         p = txt.split(); bn = "".join(filter(str.isdigit, p[1]))[:6]; am = int(p[2]) if len(p) > 2 else 10
                         if am > 100000: am = 100000
-                        log_at(f"🎲 **Gen:** `{am}` | BIN: `{bn}` | @{u_name}")
-                        
                         cards = []
                         for _ in range(am):
                             c = str(bn)
@@ -114,17 +122,15 @@ def main():
                             for i in range(10):
                                 if luhn(c + str(i)): c += str(i); break
                             cards.append(f"{c}|{random.randint(1,12):02d}|{random.randint(2026,2032)}|{random.randint(100,999)}")
-                        
                         if am <= 150:
                             requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"✅ **MerliV4 Üretim:**\n\n`" + "\n".join(cards) + "`", "parse_mode": "Markdown"})
                         else:
-                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"🚀 **{am}** Kart dosya olarak gönderiliyor..."})
                             with open("MerliV4_gen.txt", "w") as f: f.write("\n".join(cards))
                             requests.post(URL + "sendDocument", data={"chat_id": cid}, files={"document": open("MerliV4_gen.txt", "rb")}); os.remove("MerliV4_gen.txt")
                     except: pass
-
         except Exception: time.sleep(1)
 
 if __name__ == "__main__":
+    keep_alive() # Bu satır olmazsa Render botu zıbartır!
     main()
-                        
+                    
