@@ -1,7 +1,4 @@
-import requests
-import random
-import time
-import os
+import requests, random, time, os
 
 # --- AYARLAR ---
 TOKEN = "8250377483:AAEn4fn1mbPE7Y8KMXP-1iGH1Tpy17bxbS4"
@@ -10,97 +7,124 @@ URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 def log_at(msg):
     try:
-        requests.post(URL + "sendMessage", json={"chat_id": ADMIN_ID, "text": f"🕵️ **LOG:** {msg}", "parse_mode": "Markdown"})
+        requests.post(URL + "sendMessage", json={"chat_id": ADMIN_ID, "text": f"🕵️ **MerliV4 LOG:**\n{msg}", "parse_mode": "Markdown"})
     except: pass
 
 def luhn(n):
     r = [int(x) for x in str(n)]
     return (sum(r[-1::-2] + [sum(divmod(d * 2, 10)) for d in r[-2::-2]]) % 10 == 0)
 
+def get_bin_info(bin_no):
+    """Geliştirilmiş BIN Sorgu (Deep Scan)"""
+    try:
+        # Daha geniş kapsamlı bir API denemesi
+        res = requests.get(f"https://data.handyapi.com/bin/{bin_no}", timeout=7).json()
+        if res.get("Status") == "SUCCESS":
+            return {
+                "bank": res.get("Bank", "Bilinmiyor"),
+                "brand": res.get("Scheme", "N/A").upper(),
+                "type": res.get("Type", "N/A").upper(),
+                "country": res.get("Country", {}).get("Name", "N/A"),
+                "status": "🟢 LİVE"
+            }
+    except: pass
+    
+    # Yedek API
+    try:
+        res = requests.get(f"https://lookup.binlist.net/{bin_no}", timeout=5).json()
+        return {
+            "bank": res.get("bank", {}).get("name", "Bilinmiyor"),
+            "brand": res.get("scheme", "N/A").upper(),
+            "type": res.get("type", "N/A").upper(),
+            "country": res.get("country", {}).get("name", "N/A"),
+            "status": "🟢 LİVE"
+        }
+    except: return None
+
 def main():
     offset = 0
-    print("🚀 Merli V70 Başlatıldı... BIN & Gen Aktif.")
-    log_at("✅ **Bot Aktif!** BIN sorguları ve loglar mermi gibi akacak.")
+    print(">>> MerliV4 Online!")
+    log_at("🔱 **MerliV4 Terminal Aktif Edildi.**")
 
     while True:
         try:
             r = requests.get(URL + "getUpdates", params={"offset": offset + 1, "timeout": 20}).json()
             for up in r.get("result", []):
                 offset = up["update_id"]
-                
-                if "message" in up and "text" in up["message"]:
-                    m = up["message"]; cid = m["chat"]["id"]; txt = m["text"]
-                    u_name = m["from"].get("username", "Yok"); uid = m["from"]["id"]
 
-                    # GİZLİ TAKİP LOGU
-                    log_at(f"👤 @{u_name} ({uid})\n💬 Mesaj: `{txt}`")
+                if "callback_query" in up:
+                    cb = up["callback_query"]; cid = cb["message"]["chat"]["id"]; data = cb["data"]
+                    if data == "b_gen":
+                        requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "🎲 **Üretim Formatı:** `/gen 516840 1000`"})
+                    elif data == "b_bin":
+                        requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "🔍 **Sorgu Formatı:** `/bin 516840`"})
+                    requests.post(URL + "answerCallbackQuery", json={"callback_query_id": cb["id"]}); continue
 
-                    if txt == "/start":
-                        kb = {"inline_keyboard": [[{"text":"🔍 BIN SORGULA","callback_data":"bin_ara"},{"text":"🎲 KART ÜRET","callback_data":"gen_ara"}]]}
-                        requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "👑 **Merli V70 VIP**\n\nBIN Sorgu ve 100K Üretim Hazır!", "reply_markup": kb, "parse_mode": "Markdown"})
+                if "message" not in up or "text" not in up["message"]: continue
+                m = up["message"]; cid = m["chat"]["id"]; txt = m["text"]
+                u_name = m["from"].get("username", "Yok")
 
-                    # --- GELİŞMİŞ BIN SORGUSU ---
-                    elif txt.startswith("/bin"):
-                        bin_no = "".join(filter(str.isdigit, txt))[:6]
-                        if len(bin_no) < 6:
-                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "❌ Eksik BIN! En az 6 hane gir."})
-                            continue
+                if not txt.startswith("/"):
+                    log_at(f"💬 **Mesaj:** @{u_name}\n📝: {txt}")
+
+                # --- START & HELP (MerliV4 Arayüzü) ---
+                if txt in ["/start", "/help"]:
+                    kb = {"inline_keyboard": [[{"text":"🔥 ÜRETİM (GEN)","callback_data":"b_gen"},{"text":"🔍 ANALİZ (BIN)","callback_data":"b_bin"}]]}
+                    msg = (
+                        "🔱 **MerliV4 - CYBER TERMINAL**\n"
+                        "──────────────────────\n"
+                        "📡 **Sistem:** `Çevrimiçi (Mermi Modu)`\n"
+                        "🚀 **Sürüm:** `v4.0 Elite`\n"
+                        "📦 **Gen Sınırı:** `100.000`\n"
+                        "──────────────────────\n"
+                        "💡 *Hızlı işlem için butonları kullanın.*"
+                    )
+                    requests.post(URL + "sendMessage", json={"chat_id": cid, "text": msg, "reply_markup": kb, "parse_mode": "Markdown"})
+
+                # --- BIN ANALİZ ---
+                elif txt.startswith("/bin"):
+                    bin_no = "".join(filter(str.isdigit, txt))[:6]
+                    if len(bin_no) < 6: continue
+                    
+                    data = get_bin_info(bin_no)
+                    if data:
+                        info = (f"🛡 **MerliV4 BİN RAPORU**\n"
+                                f"──────────────────\n"
+                                f"🔢 **BİN:** `{bin_no}`\n"
+                                f"🏛 **BANKA:** `{data['bank']}`\n"
+                                f"💳 **TİP:** `{data['type']} / {data['brand']}`\n"
+                                f"🌍 **ÜLKE:** `{data['country']}`\n"
+                                f"📡 **DURUM:** `{data['status']}`")
+                        requests.post(URL + "sendMessage", json={"chat_id": cid, "text": info, "parse_mode": "Markdown"})
+                        log_at(f"🔍 **BIN:** `{bin_no}` | @{u_name}")
+                    else:
+                        requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "🔴 **Hata:** BIN bilgisi bulunamadı."})
+
+                # --- GEN SİSTEMİ (150 LİMİTİ) ---
+                elif txt.startswith("/gen"):
+                    try:
+                        p = txt.split(); bn = "".join(filter(str.isdigit, p[1]))[:6]; am = int(p[2]) if len(p) > 2 else 10
+                        if am > 100000: am = 100000
+                        log_at(f"🎲 **Gen:** `{am}` | BIN: `{bn}` | @{u_name}")
                         
-                        try:
-                            # Çoklu API desteği (Biri hata verirse diğeri çalışır)
-                            res = requests.get(f"https://lookup.binlist.net/{bin_no}").json()
-                            bank = res.get("bank", {}).get("name", "Bilinmiyor")
-                            country = res.get("country", {}).get("name", "Bilinmiyor")
-                            emoji = res.get("country", {}).get("emoji", "🌍")
-                            brand = res.get("scheme", "Bilinmiyor").upper()
-                            card_type = res.get("type", "Bilinmiyor").upper()
-                            
-                            info = (f"🔍 **BIN INFO:** `{bin_no}`\n"
-                                    f"────────────────\n"
-                                    f"🏛 **Banka:** `{bank}`\n"
-                                    f"💳 **Tür:** `{card_type} / {brand}`\n"
-                                    f"🌍 **Ülke:** `{country} {emoji}`\n"
-                                    f"🟢 **Durum:** `LIVE (Active)`")
-                            
-                            # Butonlu Şık Tasarım
-                            kb_bin = {"inline_keyboard": [[
-                                {"text": "✅ LIVE", "callback_data": "dummy"},
-                                {"text": "❌ DEAD", "callback_data": "dummy"}
-                            ]]}
-                            
-                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": info, "parse_mode": "Markdown", "reply_markup": kb_bin})
-                            log_at(f"🔍 **BIN Sorgulandı:** `{bin_no}`\n👤: @{u_name}")
-                        except:
-                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": "❌ BIN Servisi şu an meşgul, tekrar dene."})
+                        cards = []
+                        for _ in range(am):
+                            c = str(bn)
+                            while len(c) < 15: c += str(random.randint(0, 9))
+                            for i in range(10):
+                                if luhn(c + str(i)): c += str(i); break
+                            cards.append(f"{c}|{random.randint(1,12):02d}|{random.randint(2026,2032)}|{random.randint(100,999)}")
+                        
+                        if am <= 150:
+                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"✅ **MerliV4 Üretim:**\n\n`" + "\n".join(cards) + "`", "parse_mode": "Markdown"})
+                        else:
+                            requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"🚀 **{am}** Kart dosya olarak gönderiliyor..."})
+                            with open("MerliV4_gen.txt", "w") as f: f.write("\n".join(cards))
+                            requests.post(URL + "sendDocument", data={"chat_id": cid}, files={"document": open("MerliV4_gen.txt", "rb")}); os.remove("MerliV4_gen.txt")
+                    except: pass
 
-                    # --- 100K ÜRETİM ---
-                    elif txt.startswith("/gen"):
-                        try:
-                            p = txt.split(); bn = "".join(filter(str.isdigit, p[1]))[:6]
-                            am = int(p[2]) if len(p) > 2 else 10
-                            if am > 100000: am = 100000
-                            
-                            cards = []
-                            for _ in range(am):
-                                c = str(bn)
-                                while len(c) < 15: c += str(random.randint(0, 9))
-                                for i in range(10):
-                                    if luhn(c + str(i)): c += str(i); break
-                                cards.append(f"{c}|{random.randint(1,12):02d}|{random.randint(2026,2032)}|{random.randint(100,999)}")
-                            
-                            if am <= 50:
-                                requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"`" + "\n".join(cards) + "`", "parse_mode": "Markdown"})
-                            else:
-                                requests.post(URL + "sendMessage", json={"chat_id": cid, "text": f"⏳ **{am}** Kart hazırlanıyor..."})
-                                with open("merli.txt", "w") as f: f.write("\n".join(cards))
-                                requests.post(URL + "sendDocument", data={"chat_id": cid}, files={"document": open("merli.txt", "rb")})
-                                os.remove("merli.txt")
-                            log_at(f"🎲 **Üretim:** {am} adet\nBIN: `{bn}`\n👤: @{u_name}")
-                        except: pass
-
-        except Exception as e:
-            time.sleep(2)
+        except Exception: time.sleep(1)
 
 if __name__ == "__main__":
     main()
-    
+                        
